@@ -1,0 +1,2086 @@
+#!/usr/bin/env python
+
+# --------------------------------------------------------------------------
+# Copyright 2016 Commvault Systems, Inc.
+# See LICENSE.txt in the project root for
+# license information.
+# --------------------------------------------------------------------------
+
+"""Main file that act as wrapper for testcase and SDK
+
+classes defined:
+    Auto_VSA_Commcell   - wrapper for commcell operations
+    Auto_VSA_VSClient   - wrapper for VSA Client operations
+    Auto_VSA_VSInstance - wrapper for VSA Instance operation
+    Auto_VSA_Backupset  - wrapper for VSA Backupset Operations
+    Auto_VSA_Subclient  - wrapper for VSA Subclient operations
+
+"""
+
+import os
+import re
+import socket
+import time
+from AutomationUtils.machine import Machine
+from AutomationUtils import database_helper
+from .HypervisorHelper import Hypervisor
+from . import VirtualServerConstants
+from . import VirtualServerUtils
+from cvpysdk.job import Job
+from AutomationUtils import cvhelper
+from AutomationUtils import logger
+
+
+class AutoVSACommcell(object):
+    """
+    class that act as wrapper for SDK and Testcase
+
+    Methods:
+            get_client_id()             - gets the client ID of given client name
+
+            get_hostname_for_client()   - get the Host name for the given client
+
+            get_base_dir()              - get the base directory of client given
+                                        (default: Commserv client)
+
+            get_client_os_type()           - get the os info of the client
+
+            _check_backup_job_type_expected()   - check the passed job id type and
+                                                    passed job type is expeted
+
+            _client_exist_in_cs()       - check if the client exist in CS
+
+            get_job_duration()          - get the job duration of the job passed
+
+            get_job_results_dir()                   - get the job results directory of the client
+                                        (default: commserv client)
+
+    """
+
+    def __init__(self, commcell, csdb):
+        """
+        Initialize the  SDK objects
+
+        Args:
+            commcell    (obj)   - Commcell object of SDK Commcell class
+
+            csdb        (obj)   - CS Database object from testcase
+
+        """
+
+        self.log = logger.get_log()
+        self.commcell = commcell
+        self.csdb = csdb
+        self.commserv_name = self.commcell.commserv_name
+        self.base_dir = self.get_base_dir()
+
+    def get_client_id(self, client_name):
+        """
+        Get the client ID for the given client
+
+        Args:
+                client_name     (str)   - Client name for whihc client Id
+                                                                                need to be fetched
+
+        Return:
+                client_id   (int)       - Id of the client name given
+
+        Exception:
+                if client does not exists in CS
+
+        """
+        try:
+            self.log.info("Getting the client ID for {0} ".format(client_name))
+            _client_obj = self.commcell.clients.get(client_name)
+            return _client_obj.client_id
+
+        except Exception as err:
+            self.log.exception(
+                "An exception occured in getting the client ID {0}".format(err))
+            raise err
+
+    def get_hostname_for_client(self, client_name=None):
+        """
+        Get the Host name for the given HostName
+
+        Args:
+                client_name     (str)   - Client name for which client Id
+                                                                                need to be fetched
+                                             default value is  commsev_name
+
+        Return:
+                host_name   (int)       - Hostname of the client name given
+
+        Exception:
+                if client does not exists in CS
+
+        """
+        try:
+            if client_name is None:
+                client_name = self.commserv_name
+
+            self.log.info("Getting HostName for Client for %s " % client_name)
+            _client_obj = self.commcell.clients.get(client_name)
+            self.log.info(
+                "Successfully got {0} client object".format(client_name))
+            return _client_obj.client_hostname
+
+        except Exception as err:
+            self.log.exception(
+                "An exception occured in getting the client ID %s" % err)
+            raise err
+
+    def get_client_name_from_hostname(self, host_name):
+        """
+        Get the Host name for the given HostName
+
+        Args:
+                host_name     (str)   - host name  for which client name
+                                                                                need to be fetched
+
+        Return:
+                client_name   (int)       -client name of the client from the given hostname
+
+        Exception:
+                if client does not exists in CS
+
+        """
+        try:
+
+            self.log.info("Getting client name for Client for %s " % host_name)
+            _query = "select name from APP_Client where net_hostname = '%s'" % host_name
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            return _results[0]
+
+        except Exception as err:
+            self.log.exception(
+                "An exception occured in getting the client ID %s" % err)
+            raise err
+
+    def get_base_dir(self, client_name=None):
+        """
+        Get the base directory for the commvault installation
+
+        Args:
+                client_name     (str)   - Client name for which client Id
+                                                                        need to be fetched
+                                            default value is    (str)   commsev_name
+
+        Return:
+                base_dir    (int)       - installtion base dir of simpana in that client
+
+        Exception:
+                if client does not exists in CS
+        """
+        try:
+            if client_name is None:
+                client_name = self.commserv_name
+
+            _client_obj = self.commcell.clients.get(client_name)
+            self.log.info(
+                "Successfully got {0} client object".format(client_name))
+            _base_dir = os.path.join(_client_obj.install_directory, "Base")
+            return _base_dir
+
+        except Exception as err:
+            self.log.exception("Error in getting the base directory %s" % err)
+            raise err
+
+    def get_client_os_type(self, client_name=None):
+        """
+        Gets the OS type [Windows / Unix] of the client
+
+        Args:
+                client_name     (str)   - Client name for which os info
+                                                                        need to be fetched
+                                            default value is    commsev_name
+        """
+        try:
+            if client_name is None:
+                client_name = self.commserv_name
+
+            _client_obj = self.commcell.clients.get(client_name)
+            self.log.info(
+                "Successfully got {0} client object".format(client_name))
+            return _client_obj.os_info
+
+        except Exception as errrr:
+            self.log.exception(
+                "An error occured in getting the OS version of the client")
+            raise errrr
+
+    def _check_backup_job_type_expected(self, job_id, job_type):
+        """
+        check if the Job Type is expected
+
+        Args:
+                job_id      (int)   - job id whohc needs to be checked
+
+                job_type    (str)   - the jpb type which the job id provided
+                                                                        dhoulf be verified with
+
+        Exception:
+                if the job type is not expected
+
+                if the job does not exist
+
+        """
+        try:
+            _job_info = Job(self.commcell, job_id)
+            _job_type_from_cs = _job_info.backup_level
+            if (_job_type_from_cs.lower()) == (job_type.lower()):
+                self.log.info("Ok.The job was %s" % job_type)
+            else:
+                raise Exception("Job type was for the jobid %s is %s which is not expected" % (
+                    job_id, job_type))
+
+        except Exception as errrr:
+            self.log.exception(
+                "An exception occurred in CheckJobTypeIsExpected")
+            raise errrr
+
+    def _client_exist_in_cs(self, client_name):
+        """
+        check particular client exist in CS
+
+        Args:
+                client_name (str)   - client which has to be chacked that it exist in CS
+
+        Return:
+                True - If exists
+
+                False- if does not exist
+        """
+        try:
+            return self.commcell.clients.has_client(client_name)
+
+        except Exception:
+            return False
+
+    def get_job_duration(self, job_id):
+        """
+        get the Duration of the particular Job
+
+        Args:
+                job_id (int)   -- job id for which duratiuon has to be fetched
+
+        Exception:
+                if job does not exist
+        """
+        try:
+            _job_info = Job(self.commcell, job_id)
+            _job_duration = (_job_info.end_time - _job_info.start_time)
+            return _job_duration
+
+        except Exception as errrr:
+            self.log.exception("An exception occurred in GetJobDuration")
+            raise errrr
+
+    def get_job_results_dir(self, client_name=None):
+        """
+        Get the Job Results Directory
+
+        Args:
+                client_name (str)   -- client name for which simapana isntalled
+                                            Job results directory has to be fetched
+                                default value is     - commserv_name
+
+        Exception:
+                if client does not exist in cs
+        """
+        try:
+            if client_name is None:
+                client_name = self.commserv_name
+
+            _client_obj = self.commcell.clients.get(client_name)
+            self.log.info(
+                "Successfully got {0} client object".format(client_name))
+            return _client_obj.job_results_directory
+
+        except Exception as err:
+            self.log.info("Failed to compute Job results Directory")
+            raise err
+
+    def find_primary_copy_id(self, sp_id):
+        """
+        find the primary copy id of the specified storage policy
+
+        Args:
+                sp_id   (int)   : storage policy id
+
+        Return:
+                primary copy id of that storage policy
+        """
+
+        try:
+            _query = "select copy from archgroup AG,archGroupCopy AGC where AGC.type = 1 and \
+            AGC.isSnapCopy = 0 and  ag.id = AGC.archGroupId and AGC.archGroupId = '%s'" % sp_id
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred getting Sp details details")
+
+            return _results[0]
+
+        except Exception as err:
+            self.log.exception("An Aerror occurred in find_primary_copy_id ")
+            raise err
+
+    def find_snap_copy_id(self, sp_id: object) -> object:
+        """
+        find the snap copy id of the specified storage policy
+
+        Args:
+                sp_id   (int)   : storage policy id
+
+        Return:
+                snap copy id of that storage policy
+        """
+
+        try:
+            _query = "select copy from archgroup AG,archGroupCopy AGC where AGC.isSnapCopy = 1 and \
+                                    ag.id = AGC.archGroupId and AGC.archGroupId = '%s'" % sp_id
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred getting Sp details details")
+
+            return _results[0]
+
+        except Exception as err:
+            self.log.exception("An Aerror occurred in FindSnapCopyId ")
+            raise err
+
+    def find_aux_copy_id(self, sp_id):
+        """
+        find the aux copy id of the specified storage policy
+
+        Args:
+                sp_id   (int)   : storage policy id
+
+        Return:
+                aux copy id of that storage policy
+        """
+
+        try:
+            _query = "select copy from archgroup AG,archGroupCopy AGC where \
+                            ag.id = AGC.archGroupId and AGC.archGroupId = '%s'" % sp_id
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred getting Sp details details")
+
+            return _results[0]
+
+        except Exception as err:
+            self.log.exception("An Aerror occurred in find_aux_copy_id ")
+            raise err
+
+
+class AutoVSAVSClient(object):
+    """
+    Main class for performing all VSClient operations
+
+    Methods:
+       enable_snap_on_client - Enable intellisnap on client
+
+    """
+
+    def __init__(self, commcell_obj, client):
+        """
+        Initialize all the class properties of AutoVSAVSClient class
+
+        Args:
+            commcell_obj    (obj)   - object of AutovsaCommcell class of VS Helper
+
+            client  (obj)   - object for Client Class in SDK
+        """
+        self.log = logger.get_log()
+        self.auto_commcell = commcell_obj
+        self.csdb = commcell_obj.csdb
+        self.vsa_client = client
+        self.vsa_client_id = self.vsa_client.client_id
+        self.vsa_client_name = self.vsa_client.client_name
+
+    def enable_snap_on_client(self):
+        """
+        enable intellisnap on agent level
+
+        Exception:
+                If failed to update the property
+q
+        """
+        try:
+            self.vsa_client.enable_intelli_snap()
+            self.log.info(
+                "Success - enabled snap on client: [%s]", self.vsa_client_name)
+
+        except Exception as err:
+            self.log.error("Failed Enable Snap on client")
+            raise Exception("Exception in EnableSnapOnClient:" + str(err))
+
+
+class AutoVSAVSInstance(object):
+    """
+    Class for perfoming Instance operations. Act as wrapper for SDK and testcases
+
+    Methods:
+            get_instance_name()     - gets the isntnace name for the agent
+
+            get_instance_id()       - get the instance id of the associated isntance
+
+            get_proxy_list()        - gets the list of proxies associated with isntance
+
+            _create_hyperviosr_object- Initialize objects for hypervisor helper
+
+            _compute_credentials()   - computes the credentials for hyperviors
+
+    """
+
+    def __init__(self, auto_client, agent, instance):
+        """
+        Initialize all the class properties of AutoVSAVSInstance class
+
+        Args:
+                agent   (obj)   - object of Agent class in SDK
+
+                instance(obj)   - object for Instance class in SDK
+        """
+        self.auto_vsaclient = auto_client
+        self.csdb = auto_client.csdb
+        self.auto_commcell = auto_client.auto_commcell
+        self.vsa_agent = agent
+        self.vsa_instance = instance
+        self.vsa_instance_name = self.vsa_instance.instance_name
+        self.vsa_instance_id = self.vsa_instance._instance_id
+        self.log = self.auto_vsaclient.log
+        self.sc_proxy_esx_host = None
+        self.vsa_co_ordinator = None
+        self.host_name = None
+        self.vsa_proxy_list = self.get_proxy_list()
+        self.hvobj = self._create_hypervisor_object()
+
+    @property
+    def proxy_list(self):
+        """Returns Proxy list assocaited with that VSInstance . Read only attribute"""
+        return self.vsa_proxy_list
+
+    @proxy_list.setter
+    def proxy_list(self, value):
+        """
+        set the list of Proxies as Proxy list in Instance level
+
+        Args:
+            value     (list) -list of proxies need to be set at instance level
+        """
+        try:
+            self.vsa_instance.associated_clients = value
+
+        except Exception as err:
+            self.log.exception(
+                    "An exception {0} has occurred while setting coordinator client ".format(err)
+                    )
+
+    @property
+    def co_ordinator(self):
+        """Retuens Proxy list assocaited witht hat VSInstance . Read only attribute"""
+        if self.vsa_co_ordinator is None:
+            self.vsa_co_ordinator = self.vsa_instance.co_ordinator
+
+        return self.vsa_co_ordinator
+
+    @co_ordinator.setter
+    def co_ordinator(self, coordinator):
+        """
+        set the proxy given as coordinator
+
+        Args:
+            Coordinator - Proxy that needs to be set as coordinator
+        """
+        try:
+
+            coordinator_client = self.auto_commcell.commcell.clients.get(coordinator)
+            temp_vsa_proxy_list = [coordinator_client.client_name] + self.vsa_proxy_list
+            self.vsa_proxy_list = list(set(temp_vsa_proxy_list))
+
+            self.proxy_list = self.vsa_proxy_list
+
+        except Exception as err:
+            self.log.exception(
+                    "An exception {0} has occurred while setting coordinator client ".format(err)
+                    )
+
+    @property
+    def fbr_ma(self):
+        """Returns FBRMA assocaited witht hat VSInstance . Read only attribute"""
+        return self.vsa_instance.fbr_MA_Unix
+
+    @fbr_ma.setter
+    def fbr_ma(self, fbr_ma_name):
+        """
+        Set the Proxy as FBR Ma for that Instance
+
+        Args:
+            fbr_ma_name : Ma that needs to be set as FBR Ma
+        """
+        self.vsa_instance.fbr_MA_unix = fbr_ma_name
+
+    @property
+    def server_credentials(self):
+        """Retuens Server Credentials assocaited witht hat VSInstance . Read only attribute"""
+        return self.host_name, self.user_name
+
+    def get_instance_name(self):
+        """
+        set Instance Id Provided Virtualization client name
+        """
+        try:
+            return self.vsa_instance.instance_name
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in setting the Instance Type %s" % err)
+            raise err
+
+    def get_instance_id(self):
+        """
+        returns the Instance id of that instance
+
+        Return:
+            instnace_id - Instance id of Instance associated with VS isntance
+
+        exception:
+                If there is no Instance
+        """
+        try:
+            return self.vsa_instance.instance_id
+
+        except Exception as err:
+            self.log.exception(
+                "ERROR - exception while getting instance id Exception:" + str(err))
+            raise err
+
+    def get_proxy_list(self):
+        """
+        get the Proxy List for the instance
+
+        returns
+                v_proxy_list    (dict)-- dict with proxy name as key and its
+                                                                        corresponding id as value
+
+        Exception:
+                if vsa_client does not exist in cs
+
+                failed to get  Instance property
+        """
+        try:
+
+            self.vsa_co_ordinator = self.vsa_instance.co_ordinator
+            return self.vsa_instance.associated_clients
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in creating the Hypervisor object  %s" % err)
+            raise err
+
+    def _create_hypervisor_object(self, client_name=None):
+        """
+        Create Hypervisor Object
+
+        Exception:
+                if initialization fails in creating object
+        """
+        try:
+            if client_name is None:
+                client_name = self.auto_vsaclient.vsa_client_name
+                instance = self.vsa_instance
+
+            else:
+                client = self.auto_commcell.commcell.clients.get(client_name)
+                agent = client.agents.get('Virtual Server')
+                instance_keys = next(iter(agent.instances._instances))
+                instance = agent.instances.get(instance_keys)
+
+            host_machine = instance.co_ordinator
+            server_host_name = instance.server_host_name
+
+            self._compute_credentials(client_name)
+            hvobj = Hypervisor(server_host_name, host_machine, self.user_name,
+                               self.password, self.vsa_instance_name, self.auto_commcell.commcell)
+
+            return hvobj
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in creating the Hypervisor object  %s" % err)
+            raise err
+
+    def _compute_credentials(self,client_name):
+        """Compute the credentials required to call the Vcenter"""
+
+        try:
+            _query = "Select attrval from APP_InstanceProp where attrname IN \
+                      ('Virtual Server Password','Virtual Server User') and componentNameId = ( \
+                      select TOP 1 instance  from APP_Application where clientId= ( \
+                Select TOP 1 id from App_Client where name = '%s'))" \
+                     % client_name
+
+            """
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_all_rows()
+            if not _results:
+                raise Exception("An exception occurred getting server details")
+
+            self.user_name = _results[0][0].strip()
+            _password = _results[1][0].strip()
+            # _password = _results[0][0].strip()
+            # self.user_name = ".\\administrator"
+            # self.password = "builder!12"
+            self.password = cvhelper.format_string(self.auto_commcell.commcell, _password)
+            #"""
+            self.user_name = ".\\administrator"
+            self.password = "builder!12"
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in getting credentials for Compute Credentials  %s" % err)
+            raise err
+
+
+class AutoVSABackupset(object):
+    """
+    class for performing backupset operations. it acts as wrapper for Testcase and SDK
+    """
+
+    def __init__(self, instance_obj, backupset):
+        """
+        Initialize SDK objects
+
+        Args:
+            backupset   (obj)   - object for backupset class in SDK
+        """
+        self.auto_vsainstance = instance_obj
+        self.auto_commcell = self.auto_vsainstance.auto_vsaclient.auto_commcell
+        self.log = self.auto_vsainstance.log
+        self.vsa_agent = self.auto_vsainstance.vsa_agent
+        self.backupset = backupset
+        self.backupset_name = self.backupset.backupset_name
+        self.backupset_id = self.backupset.backupset_id
+
+
+class AutoVSASubclient(object):
+    """
+    class for performing subclient operations. It act as wrapper for Testcase and SDK
+    """
+
+    def __init__(self, backupset_obj, subclient):
+        """
+        Initialize subclient SDK objects
+
+        Args:
+            subclient (obj) - object of subclient class of SDK
+        """
+
+        self.auto_vsa_backupset = backupset_obj
+        self.log = self.auto_vsa_backupset.log
+        self.auto_vsainstance = self.auto_vsa_backupset.auto_vsainstance
+        self.auto_vsaclient = self.auto_vsainstance.auto_vsaclient
+        self.vsa_agent = self.auto_vsainstance.vsa_agent
+        self.auto_commcell = self.auto_vsainstance.auto_commcell
+        self.csdb = self.auto_commcell.csdb
+        self.hvobj = self.auto_vsainstance.hvobj
+        self.subclient = subclient
+        self.subclient_name = self.subclient.subclient_name
+        self.subclient_id = self.subclient.subclient_id
+        self._browse_ma_id = self.subclient.storage_ma_id
+        self._browse_ma = self.subclient.storage_ma
+        self.quiesce_file_system = True
+        self._disk_filter = []
+        self._disk_filter_input = None
+        self._vm_record = {}
+        self.vm_filter = None
+        self._vm_content = None
+        self.vm_list = None
+        self.backup_folder_name = None
+        self.testdata_path = None
+        self.disk_restore_dest = None
+        self._is_live_browse = False
+        self.ma_machine = None
+        self.build_folder_path = None
+        self.set_content_details()
+        # self.set_disk_filter_details()
+
+    @property
+    def storage_policy(self):
+        """Returns storage policy associated with subclient.Read only attribute"""
+        return self.subclient.storage_policy
+
+    @storage_policy.setter
+    def storage_policy(self, value):
+        """
+        Set the Specified Storage Policy
+
+        Args:
+            value - storage policy name
+
+        Exception:
+            if storage policy does not exist
+        """
+        self.subclient.storage_policy = value
+
+    @property
+    def storage_policy_id(self):
+        """Returns storage policy id associated with subclient.Read only attribute"""
+        sp_name = self.auto_commcell.commcell.storage_policies.get(
+            self.storage_policy)
+        return sp_name.storage_policy_id
+
+    @property
+    def vm_content(self):
+        """
+             Returns content  associated with subclient in the form of dict.Read only attribute
+
+             Return:
+                 content    (dict)  - with keys
+                 {
+                'allOrAnyChildren': True,
+                'equalsOrNotEquals': True,
+                'name': anme of the VM,
+                'displayName': display name of the VM,
+                'path': source path of the VM,
+                'type': 9(VM),1(Host)
+                        }
+
+        """
+
+        return self.subclient.content
+
+    @vm_content.setter
+    def vm_content(self, content):
+        """
+        set the specified content as content in subclient
+
+        Args:
+            content (str)   -   like [VM]=startswith=test*,test1
+                                                        [VM] - represent type
+                                                                        like [DNS],[HN]
+
+                                                        startswith  represent equality in GUI
+                                                                like endswith,equals
+
+                                                        test* - include all VM starts with test
+                                                               adding dyanamic contetn in GUI
+
+                                                        , - to include multiple content
+
+                                                        test1 -  non-dynamic content
+        """
+        self._vm_content = content
+        self.set_content_details()
+
+    @property
+    def browse_ma(self):
+        """
+        Returns the browse MA from which the disk restore is perfomed
+        It is read only attribute
+        """
+        return self._browse_ma, self._browse_ma_id
+
+    def __deepcopy__(self, tempobj):
+        """
+        over ride deepcopy method to copy every attribute of an objevt to other
+        """
+        try:
+            cls = tempobj.__class__
+            result = cls.__new__(cls, tempobj, tempobj.vm_name)
+            for k, v in tempobj.__dict__.items():
+                setattr(result, k, v)
+            return result
+
+        except Exception as err:
+            self.log.exception("Failed to deepcopy Exception:" + str(err))
+            raise err
+
+    def get_previous_full_backup(self, job_id):
+        """
+        Get the Previous full backup  for this subclient
+
+        args:
+                job_id  (int) - for which previous full has to be fetched
+
+        Exception:
+                if failed to get app id
+
+
+        returns:
+            job id  (int) - job id of the previous full backup of given current backup
+
+        """
+        try:
+            _job_list = []
+            _query = "Select id from APP_Application where instance = %s and \
+                        backupSet = %s and subclientName = '%s'" % \
+                     (self.auto_vsainstance.vsa_instance_id,
+                      self.auto_vsa_backupset.backupset_id, self.subclient_name)
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred in getting previous full backup")
+
+            _AppId = _results[0]
+
+            _query1 = "Select jobId  from JMBkpStats where appId = %s and appType = %s \
+                                    and bkpLevel = 1" % \
+                      (_AppId, VirtualServerConstants.APP_TYPE)
+
+            self.csdb.execute(_query1)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred in getting previous full backup")
+
+            for each_result in _results:
+                tempval = each_result[0]
+                if tempval != job_id:
+                    _job_list.append(tempval)
+
+            _job_list.sort(reverse=True)
+
+            return _job_list[0]
+
+        except Exception as err:
+            self.log.exception(
+                "Failed to get Previous Full Job Exception:" + str(err))
+            raise Exception("ERROR - exception while GetPreviousFULLBackup")
+
+    def set_content_details(self):
+        """
+        Update the subclient details in subclient and prepares VM List
+
+        Exception:
+                if failed to update subclient
+        """
+        try:
+
+            if self._vm_content is None:
+                _vm_content_string = self._prepare_content_string_from_dict(
+                    self.subclient.content)
+                _vm_content_dict = self.subclient.content
+
+            elif isinstance(self._vm_content, str):
+                _vm_content_string = self._vm_content
+                option, equality, pattern = self.split_content_string(
+                    _vm_content_string)
+                _vm_content_dict = self._prepare_content_dict_from_string(
+                    option, pattern, equality)
+
+            else:
+                raise Exception("Failed in setting Subclient Content")
+
+            # VM Filter string and dict
+            _vm_filter_string, _vm_filter_dict = self.set_filter_details()
+
+            # prepare VM List
+            self.prepare_vm_list(_vm_content_string, _vm_filter_string)
+            self.update_vsa_subclient_content(
+                _vm_content_dict, _vm_filter_dict)
+
+        except Exception as err:
+            self.log.exception(
+                "Failed to SetContentDetails Exception:" + str(err))
+            raise err
+
+    def set_filter_details(self):
+        """
+        Creates Filter string and dictionary can be with details for SDK API
+
+        """
+        try:
+
+            _vm_filter_string = None
+            _vm_filter_dict = {}
+
+            if self.vm_filter is None:
+                if self.subclient.vm_filter is not None:
+                    _vm_filter_string = self._prepare_content_string_from_dict(
+                        self.subclient.vm_filter)
+                    _vm_filter_dict = self.subclient.vm_filter
+
+            elif isinstance(self._vm_content, str):
+                _vm_filter_string = self.vm_filter
+                option, equality, pattern = self.split_content_string(
+                    _vm_filter_string)
+                _vm_filter_dict = self._prepare_content_dict_from_string(
+                    option, pattern, equality)
+
+            return _vm_filter_string, _vm_filter_dict
+
+        except Exception as err:
+            self.log.exception(
+                "Failed to SetContentDetails Exception:" + str(err))
+            raise err
+
+    def _prepare_content_string_from_dict(self, content):
+        """
+        prepares string format of subclient content for preparing vm list
+
+        Args:
+                content (dict)  - with keys
+                                         {
+                                'equal_value': True,
+                                'name': anme of the VM,
+                                'display_name': display name of the VM,
+                                'path': source path of the VM,
+                                'type': Virtual Machine(VM),Host Name(Host)
+                                        }
+
+        returns:
+                vm_content_string   -(str)  - [VM]=equals=test1
+        """
+        try:
+            vm_content_string = ''
+            for _each_vm in content:
+                value = _each_vm["type"]
+                _content_types = VirtualServerConstants.content_types
+                _vm_display_name = _each_vm["display_name"]
+                _option = _content_types[value]
+                _pattern = _vm_display_name
+
+                if _vm_display_name.startswith('*'):
+                    _equality = "Ends with"
+                    _pattern = _vm_display_name[1:]
+                    content_str = _option + "=" + _equality + "=" + _pattern
+                    _vm_content_string = content_str + ","
+                    vm_content_string = vm_content_string + _vm_content_string
+                    continue
+
+                elif _vm_display_name.endswith('*'):
+                    _equality = "Starts with"
+                    _pattern = _vm_display_name[:-1]
+                    content_str = _option + "=" + _equality + "=" + _pattern
+                    _vm_content_string = content_str + ","
+                    vm_content_string = vm_content_string + _vm_content_string
+                    continue
+
+                elif "*" in _vm_display_name:
+                    if _each_vm["equal_value"]:
+                        _equality = "Contains"
+                    else:
+                        _equality = "Does not Contains"
+
+                    content_str = _option + "=" + _equality + "=" + _pattern
+                    _vm_content_string = content_str + ","
+                    vm_content_string = vm_content_string + _vm_content_string
+                    continue
+
+                elif _each_vm["equal_value"]:
+                    _equality = "Equals"
+                    content_str = _option + "=" + _equality + "=" + _pattern
+                    _vm_content_string = content_str + ","
+                    vm_content_string = vm_content_string + _vm_content_string
+                    continue
+
+                else:
+                    _equality = "Does Not Equals"
+                    content_str = _option + "=" + _equality + "=" + _pattern
+                    _vm_content_string = content_str + ","
+                    vm_content_string = vm_content_string + _vm_content_string
+
+            vm_content_string = vm_content_string[:-1]
+
+            return vm_content_string
+
+        except Exception as err:
+            self.log.exception(
+                "Failed to PrepareVMListfromSCContent Exception:" + str(err))
+            raise err
+
+    def get_maname_from_policy(self):
+        """
+        Get the MA Name from policy associated with subclient
+
+        return:
+                ma_name     (str)   - ma client name associated with SP
+
+        Exception:
+                if failed to get ma name
+        """
+        try:
+            _query = "select DISTINCT AC.name  from MMDataPath MDP, APP_Client AC where \
+                        MDP.HostClientId = AC.id AND MDP.CopyId in \
+                    (select id from archGroupCopy where archGroupId = %s)" % self.storage_policy_id
+
+            self.csdb.execute(_query)
+            _results = self.csdb.fetch_one_row()
+            if not _results:
+                raise Exception(
+                    "An exception occurred in getting ma from policy")
+
+            ma_name = _results[0]
+            return ma_name
+
+        except Exception as err:
+            self.log.exception(
+                "Failed to GetStoragePolicy Exception:" + str(err))
+            raise err
+
+    def update_vsa_subclient_content(self, vm_content_dict, vm_filter_dict):
+        """
+        Updates the VSA Subclient Content using SDK
+
+        Args:
+                vm_content_dict     (dict)  - dict in format to pass through SDK API
+
+                vm_filter_dict      (dict)  - dict in format to pass through SDK API
+
+        """
+
+        try:
+
+            # self.subclient.content = vm_content_dict
+
+            # if vm_filter_dict != {}:
+            # self.subclient.vm_filter = vm_filter_dict
+
+            # if not(self._disk_filter == []):
+            # self.PrepareDiskList()
+
+            for each_vm in self.vm_list:
+                if not hasattr(self.hvobj.VMs, each_vm):
+                    self.hvobj.VMs = each_vm
+
+                    # if not(self._disk_filter == []):
+                    # self.PrepareDiskFilterList()
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in updating  the subclient %s" % err)
+            raise err
+
+    def get_vm_record_based_on_pattern(self, option, pattern, equality):
+        """
+        Get all the VM from hypervisor and  get the record of VM based on the pattern
+
+        Args:
+                option - [VM],[HN] -content is VM, Hostname etc..
+
+                quality - startswith,equals etc.,
+
+                pattern - pattern with wihich the option starts
+        """
+        try:
+
+            if option == "[HN]":
+                _hypervisor_vm_list = self.hvobj.get_all_vms_in_hypervisor(
+                    pattern)
+
+            elif (option == "[VM]") and (equality == "Equals"):
+                _hypervisor_vm_list = [pattern]
+
+            else:
+                _hypervisor_vm_list = self.hvobj.get_all_vms_in_hypervisor()
+
+            for _each_vm in _hypervisor_vm_list:
+                if _each_vm not in self.hvobj.VMs.keys():
+                    self.hvobj.VMs = _each_vm
+
+        except Exception as err:
+            self.log.exception(
+                "An Exception occurred in getting VM record fpor all VMs in Hypervisor  %s" % err)
+            raise err
+
+    def _is_dyanamic_content(self, content):
+        """
+        Args:
+                content     (str)   -- content in the form of [VM]=startswith=test*
+
+        returns:
+                non_dynamic_content_list    (list)  - returns the non dynamic content
+                                                        like [VM]=equals=test1
+
+                dynamic_content_list        (list)  - returns the dynamic content list
+                                                        like [VM]=startswith-test1
+
+        """
+        try:
+            dynamic_content_list = []
+            non_dynamic_content_list = []
+            _input_lists = content.split(":")
+            for _input_list in _input_lists:
+                _inputs = _input_list.split(",")
+                for _input_string in _inputs:
+                    # regex checek
+                    _pattern_list = _input_string.split(
+                        "=")  # individual items
+                    if len(_pattern_list) != 3:
+                        non_dynamic_content_list.append(_input_string)
+                    else:
+                        dynamic_content_list.append(_input_string)
+
+            return non_dynamic_content_list, dynamic_content_list
+
+        except Exception as err:
+            self.log.exception(
+                "Exception occurred in isDynamicContent.Error [%s]", str(err))
+            raise err
+
+    def _compute_vm_list_from_dynamic_content(self, content_list):
+        """
+    Phase I of dynamic content evaluation - Get all VM records in dictionary based on option given
+
+        Args:
+                content_list    (list)  - list of dynamic content string like [VM]=startswith=test*
+        """
+        try:
+
+            for content in content_list:
+                option, equality, pattern = self.split_content_string(content)
+                self.get_vm_record_based_on_pattern(option, pattern, equality)
+            if not self.hvobj.VMs:
+                self.log.error("Error while retrieving VMs and their records")
+                raise Exception("Error while retrieving VMs and their records")
+
+            self.log.info("Records for all VMs are created successfully")
+
+        except Exception as err:
+            self.log.exception(
+                "Exception in function ComputeVmListWithDynamicContent ")
+            raise Exception(err)
+
+    def _match_pattern_in_input(self, vm, equality, pattern):
+        """
+        It performs pattern matching. like the pattern is test* and
+        if the Vm is test1 it returns True
+
+        Args:
+                vm -        (str)    - Name of the Vm against which mattern is need to be matched
+
+                equality    (str)   - like equals, notequals
+
+                pattern     (str)   -patterns which needs to bematched with the vm
+                                                            like test*,test*1
+
+        return:
+                True        (bool)  - if the pattern matches the VM
+
+                False       (bool)  -if the pattern does not matches for the VM
+
+        """
+
+        try:
+            if (equality == "Equals") | (equality == "Does Not Equals"):
+                match = re.search(pattern, vm, flags=re.I)
+                if match:
+                    return True
+            elif (equality == "Contains") | (equality == "Does Not Contains"):
+                pattern = ".*" + pattern + ".*"
+
+            elif equality == "Starts with":
+                pattern = pattern + ".*"
+
+            elif equality == "Ends with":
+                pattern = ".*" + pattern
+
+            # pattern of the form ab*cd
+            if (((pattern[len(pattern) - 1] != '*') & (pattern[len(pattern) - 1] != '+'))
+                    & (pattern[0] != '.')):
+                pattern = pattern + '$'
+                match = re.match(pattern, vm, flags=re.I)
+
+            elif pattern[0] != '.':  # pattern of the form abc*
+                match = re.match(pattern, vm, flags=re.I)
+
+            # pattern of the form *abc
+            elif (pattern[len(pattern) - 1] != '*') & (pattern[len(pattern) - 1] != '+'):
+                pattern = pattern + '$'
+                match = re.search(pattern, vm, flags=re.I)
+
+            else:  # pattern of the form *abc*
+                match = re.search(pattern, vm, flags=re.I)
+
+            if not match:
+                self.log.info("Does not match")
+                return False
+            else:
+                return True
+
+        except Exception as err:
+            self.log.exception("Exception while matching patterns. ")
+            raise err
+
+    def split_content_string(self, pattern_string):
+        """
+        split the content string to option equality pattern
+
+        Args:
+                pattern_string  (str)   - the input contetn string is [VM]=startswith=test*
+
+        return:
+
+                option = [VM] - represent the content is VM
+
+                equality = startswith = the VM name shoudl starts with the test*
+
+                pattern = test*
+
+        """
+        try:
+            listvalue = pattern_string.split("=")
+            if len(listvalue) == 3:
+                option = (listvalue[0]).strip()
+                equality = (listvalue[1]).strip()
+                pattern = (listvalue[2]).strip()
+                # commenting out filter string for now since its functionality
+                # is done by MatchPatternforFilter
+                # pattern = self.FetchPatterfromFilterString(equality, pattern)
+                self.log.info("Input is evaluated successfully")
+                return option, equality, pattern
+            else:
+                raise Exception("Input string id in not correct format")
+
+        except Exception as err:
+            self.log.exception("Exception while evaluating input. ")
+            raise err
+
+    def process_sc_input_for_vm_list(self, dynamic_content):
+        """
+        process the input contetn string and return the final set of Vms
+
+        Args:
+                dynamic_content (str)   - process the dynamic content [VM]=startswith=test*
+
+        returns:
+                qualified_list  (list)  - Qualified list of VMs like test1,test2,test3
+
+        """
+        try:
+            _qualified_list = []
+            _disqualified_list = []
+            vm_list = self.hvobj.VMs.keys()
+
+            def process_content(prop):
+                for vm in vm_list:
+                    _vm_prop_value = getattr(self.hvobj.VMs[vm], prop)
+                    _retcode = self._match_pattern_in_input(
+                        _vm_prop_value, equality, pattern)
+
+                    if (((equality == "Does Not Equals") | (equality == "Does Not Contains"))
+                            & (_retcode is True)):
+                        _disqualified_list.append(vm)
+
+                    elif _retcode:
+                        _qualified_list.append(vm)
+
+                return _qualified_list, _disqualified_list
+
+            process_filter_dict = VirtualServerConstants.vm_pattern_names
+
+            for content in dynamic_content:
+                option, equality, pattern = self.split_content_string(content)
+                _qualified_list, _disqualified_list = process_content(
+                    process_filter_dict[option])
+
+            self.log.info("Qualified list is made successfully.")
+
+            _qualified_list = list(
+                set(_qualified_list) - set(_disqualified_list))
+            return _qualified_list
+
+        except Exception as err:
+            self.log.exception(
+                "Exception while applying filters. Error [%s]", str(err))
+            raise err
+
+    def _process_vm_content(self, content):
+        """
+        process the VM content passed as input
+
+        Args:
+                content (str)   -   like [VM]=startswith=test*,test1
+                                                        [VM] - represent type
+                                                                        like [DNS],[HN]
+
+                                                        startswith  represent equality in GUI
+                                                                like endswith,equals
+
+                                                        test* - include all VM starts with test
+                                                               adding dyanamic contetn in GUI
+
+                                                        , - to include multiple content
+
+                                                        test1 -  non-dynamic content
+
+                Return:
+                        non_dynamic_content -   (list)  - list of Vms from non dynamic content
+
+                        dynamic_list        -   (list)  - list of Vms from dynamic content
+
+
+        """
+        self.log.info("Processing VM content is %s" % content)
+        try:
+            self.log.info("getting VMs using GetVMlist()")
+            non_dynamic_content = []
+
+            non_dynamic_list, dynamic_content = self._is_dyanamic_content(content)
+
+            if non_dynamic_list:
+                for _each_content in non_dynamic_list:
+                    _pattern_list = _each_content.split("=")
+                    non_dynamic_content.append(_pattern_list[1])
+
+            if len(dynamic_content) == 0:
+                for _each_vm in non_dynamic_content:
+                    if _each_vm not in self.hvobj.VMs.keys():
+                        self.hvobj.VMs = _each_vm
+
+                return non_dynamic_content, dynamic_content
+
+            else:
+                self._compute_vm_list_from_dynamic_content(dynamic_content)
+                dynamic_list = self.process_sc_input_for_vm_list(
+                    dynamic_content)
+
+            return non_dynamic_content, dynamic_list
+
+        except Exception as err:
+            self.log.exception(
+                "ERROR - VMList could be empty, please check the config file %s", str(err))
+            raise err
+
+    def prepare_vm_list(self, content_string=None, filter_string=None):
+        """
+        prepare the final set of VM list including filters
+
+        Args:
+                content_string  (str)   - content string given by user or fetched from
+                                                            subclient (format: [VM]=equals=test1)
+
+                filter_string   (str)   -filter string given by user or fetched from
+                                                            subclient (format: [VM]=equals=test1)
+
+        """
+        try:
+            if content_string is None:
+                content_string = self._vm_content
+
+            if filter_string is None:
+                filter_string = self.vm_filter
+
+            non_dynamic_content_list, dynamic_content_list = self._process_vm_content(
+                content_string)
+
+            if not ((filter_string == "") or (filter_string is None)):
+                non_dynamic_filter_list, dynamic_filter_list = self._process_vm_content(
+                    filter_string)
+            else:
+                non_dynamic_filter_list = []
+                dynamic_filter_list = []
+
+            _filter_list = list(non_dynamic_filter_list) + \
+                           list(dynamic_filter_list)
+            _final_dynamic_content_list = set(
+                dynamic_content_list) - set(_filter_list)
+            _vm_list = list(_final_dynamic_content_list) + \
+                       list(non_dynamic_content_list)
+            self.vm_list = list(set(_vm_list))
+
+        except Exception as err:
+            self.log.exception(
+                "An exception occurred in Updating the Subclient Property")
+            raise Exception(err)
+
+    def _prepare_content_dict_from_string(self, option, pattern, equality=None, is_dynamic=False):
+        """
+        Create content in the for SDK API
+
+        Args:
+                option      - [VM],[HN] - Vms , HostNames
+
+                equality    - like equals or not equals
+
+                pattern     -  pattern like test1,test*
+
+                is_dynamic  -   if it is dynamic or non dynamic content
+
+        Return:
+                vm content dict
+                        content (dict)  - with keys
+                                         {
+                                'allOrAnyChildren': True,
+                                'equalsOrNotEquals': True,
+                                'name': anme of the VM,
+                                'displayName': display name of the VM,
+                                'path': source path of the VM,
+                                'type': 9(VM),1(Host)
+                                        }
+
+        """
+        try:
+            # Add Name as pattern
+            _vm_content_dict = {pattern: {}}
+            _vm_content_dict[pattern]["name"] = pattern
+            _vm_content_dict[pattern]["displayName"] = pattern
+            _vm_content_dict[pattern]["path"] = ""
+
+            if equality is not None:
+                if (equality == "Does Not Equals") or (equality == "Does Not Contains"):
+                    _vm_content_dict[pattern]["equalsOrNotEquals"] = False
+                else:
+                    _vm_content_dict[pattern]["equalsOrNotEquals"] = True
+
+            else:
+                _vm_content_dict[pattern]["equalsOrNotEquals"] = True
+
+            if option == "[VM]":
+                if is_dynamic:
+                    _vm_content_dict[pattern]["type"] = "Virtual Machine"
+                else:
+                    _vm_content_dict[pattern]["type"] = "Virtual Machine"
+                    _vm_content_dict[pattern]["path"] = self.hvobj.VMs[pattern].GUID
+
+            else:
+                con_type = [_key for _key, _value in VirtualServerConstants.content_types.items(
+                ) if _value == option][0]
+                _vm_content_dict[pattern]["type"] = "%s" % con_type
+
+            return _vm_content_dict
+
+        except Exception as err:
+            self.log.exception(
+                "An exception occurred in  CreateContentinSCFormat %s" % err)
+            raise err
+
+    def _check_if_windows_live_browse(self, os_name, metadata_collected):
+        """
+        Decides Live browse validation need to be perfomred or not.
+
+        Args:
+                os_name             (str)   - os name of  backups VM
+
+                metdata_collected   (bool)  - True on metadata collected , false on not collected
+
+        return:
+                True    - If live browse validation needs to be performed
+                False   - if live browse validation need notto be performed
+
+        """
+        try:
+            if (os_name == "Windows") and (not metadata_collected):
+                return True
+
+            else:
+                return False
+
+        except:
+            self.log.exception(
+                "An exception occurred in checking live browse validation neeeded")
+            return False
+
+    def vsa_discovery(self):
+        """
+        Creates testdata path and generate testdata and copy the test data to each drive in VM .
+        """
+        try:
+            self.log.info("TesdataPath provided is %s" % self.testdata_path)
+            for _vm in self.vm_list:
+                self.hvobj.VMs[_vm].update_vm_info('All', True)
+                for _drive in self.hvobj.VMs[_vm].drive_list:
+                    self.log.info("COpying Testdata to Drive %s" % _drive)
+                    # self.hvobj.copy_test_data_to_each_volume(
+                            #_vm, _drive, self.backup_folder_name, self.testdata_path)
+
+        except Exception as err:
+            self.log.exception(
+                "Exception while doing VSA Discovery  :" + str(err))
+            raise err
+
+    def backup(self, backup_option):
+        """
+        Submit VSA backup job
+
+        Args:
+                backup_option   (obj)   - object of Backup Options class in options
+                                                    helper containes all backup options
+
+        Raise Exception:
+                if job does not complete successfully
+
+        """
+        try:
+            self.backup_folder_name = backup_option.backup_type
+            self.testdata_path = backup_option.testdata_path
+
+            if not self.testdata_path:
+                self.testdata_path = VirtualServerUtils.get_testdata_path(
+                    self.hvobj.machine)
+
+            self.vsa_discovery()
+
+            """
+
+            _backup_job = self.subclient.backup(backup_option.backup_type,
+                                                backup_option.run_incr_before_synth,
+                                                backup_option.incr_level,
+                                                backup_option.collect_metadata)
+
+            if not _backup_job.wait_for_completion():
+                raise Exception(
+                    "Failed to run restore out of place job with error: " +
+                    str(_backup_job.delay_reason)
+                )
+            self.log.info("Backup Job {0} completed successfully".format(
+                _backup_job.job_id))
+            self.log.info("Backup Job got complete")
+
+            # _backup_job  = Job(self.auto_commcell.commcell,"631968")
+
+            self.log.info(
+                "Checking if Job type is Expected for job ID {0}".format(_backup_job.job_id))
+
+            self.auto_commcell._check_backup_job_type_expected(
+                _backup_job.job_id, backup_option.backup_type)
+
+            # """
+
+        except Exception as err:
+            self.log.exception(
+                "Exception while submitting Backup job:" + str(err))
+            raise err
+
+    def guest_file_restore(self, fs_restore_options):
+        """
+
+        perform Guest file restore for specific subclinet
+
+        Args:
+                fs_restore_options  -options that need to be set while performing guest fiel restore
+
+        Exception:
+                        if job fails
+                        if validation fails
+
+        """
+
+        try:
+            #disk_count_before_restore = 0
+
+            for _vm in self.vm_list:
+                for _drive in self.hvobj.VMs[_vm].drive_list:
+
+                    _preserve_level = int(fs_restore_options.preserve_level)+\
+                                            self.hvobj.VMs[_vm].preserve_level
+                    self.log.info("Restore dest path " +
+                                  fs_restore_options.restore_path)
+                    _fs_path_to_browse = _drive + "\\"+self.backup_folder_name+"\\TestData"
+
+                    self.fs_restore_dest = fs_restore_options.restore_path+"\\"+\
+                                           self.backup_folder_name + \
+                                            "\\"+_vm+"\\"+_drive.split(":")[0]
+
+                    # """
+                    self._is_live_browse = self._check_if_windows_live_browse(
+                                                          self.hvobj.VMs[_vm].GuestOS,
+                                                          fs_restore_options.metadata_collected)
+
+                    if self._is_live_browse:
+                        self.log.info("Getting the count of disk of Ma {0} before "
+                            "Guest file restore for live browse".format(
+                                            fs_restore_options._browse_ma_client_name))
+
+                        self.ma_machine = Machine(fs_restore_options._browse_ma_client_name,
+                                                  self.auto_commcell.commcell)
+                        self.ma_client_name = self.auto_commcell.commcell.clients.get(
+                                                    fs_restore_options._browse_ma_client_name)
+                        disk_count_before_restore = self.ma_machine.get_disk_count()
+
+                    """
+                    fs_restore_job = self.subclient.guest_file_restore(_vm,
+                        _fs_path_to_browse, fs_restore_options.destination_client,
+                        self.fs_restore_dest, fs_restore_options.copy_precedence,
+                        _preserve_level, fs_restore_options.unconditional_overwrite)
+
+                    if not fs_restore_job.wait_for_completion():
+                        raise Exception(
+                            "Failed to run file level restore  job with error: " +
+                            str(fs_restore_job.delay_reason)
+                        )
+
+                    self.log.info("file level restore  Job got complete JOb Id:{0}".format(
+                                                                        fs_restore_job.job_id))
+
+                    # File level Validation
+                    #self.fs_testdata_validation(
+                        #self.hvobj.VMs[_vm].host_machine, self.fs_restore_dest+"\\TestData")
+
+                    # """
+                    if self._is_live_browse:
+                        self.block_level_validation(disk_count_before_restore, _vm,
+                                                    fs_restore_options._browse_ma_client_name)
+
+            self.log.info(
+                "Ran file level restore from all the VMs and its drives")
+
+        except Exception as err:
+            self.log.exception(
+                "Exception at restore job please check logs for more details %s", str(err))
+            self.log.info("Restore: FAIL - File level files Restore Failed")
+            raise err
+
+    def get_extent_count(self, db_path, db_name):
+        """
+        Get the extent number of extetnts in live browse DB
+        :param db_path: db path of the livebrowse db
+        :return:
+            extent_count    (int)   - Number of extents in DB currently
+        """
+
+        try:
+
+            utils_path = VirtualServerUtils.UTILS_PATH
+
+            if not self.build_folder_path:
+                extent_count_file = os.path.join(utils_path, "Extentcount.py")
+
+                extent_setup_file = os.path.join(utils_path, "setup.py")
+
+                db_file_path = os.path.join(db_path, db_name)
+                with open(extent_count_file, 'r') as f_obj:
+                    _script = f_obj.read()
+                    _script = _script.replace('\xef\xbb\xbf', '')
+
+                db_argument_list = re.findall(r'##Automation--([\w_]*)--##', _script)
+
+                for argument in db_argument_list:
+                    value = "{0}".format(db_file_path.strip())
+                    _script = _script.replace('##Automation--{0}--##'.format(argument), value)
+
+                extent_count_temp_file  = os.path.join(utils_path, "Extentcounttemp.py")
+                with open(extent_count_temp_file, 'w') as f_obj:
+                    f_obj.write(_script)
+                    f_obj.close()
+
+                exe_command = "python \""+extent_setup_file+"\""+" build"
+                controller_client_name = self.auto_commcell.get_client_name_from_hostname(socket.getfqdn())
+                controller_machine = self.auto_commcell.commcell.clients.get(controller_client_name)
+
+                output = controller_machine.execute_command(exe_command)
+
+                if output.exception_message:
+                    raise Exception(output.exception_message)
+
+                build_path = os.path.join(utils_path, "build")
+                self.ma_client_name.upload_folder(build_path, db_path)
+
+                _build_folder = os.path.join(db_path, "build")
+                if self.ma_machine.check_directory_exists(_build_folder):
+                    self.build_folder_path = _build_folder
+
+                else:
+                    raise Exception("Failed to copy the extent exe folder")
+
+            extent_count_exe_path = os.path.join(self.build_folder_path, "exe.win-amd64-3.6", "Extentcounttemp.exe")
+            output = self.ma_machine.execute_exe(extent_count_exe_path)
+            return int(output.strip())
+
+        except Exception as e:
+            self.log.exception("An exception occurred in getting extent count {0}".format(e))
+            raise e
+
+    def block_level_validation(self, disk_count_before_restore, _vm, browse_ma):
+        """
+        Perfoms Windows Block level validation
+        :param disk_count_before_restore: disk count of Ma before performing guest file restore
+        :param _vm: backup Vm for which guest level restore is performed
+        :param browse_ma: Ma used for guest file restore browse
+        Raise:
+            Exception:
+                when unmount fails
+        """
+
+        try:
+
+            wait_time = 0
+            error_count = 0
+            pre_extent_count = 0
+
+            print(self.hvobj.VMs[_vm].GuestOS)
+            if self.hvobj.VMs[_vm].GuestOS == "Windows":
+
+                while wait_time <= 500:
+                    self.log.info("performing pruning validation on Browse MA {0}".format(browse_ma))
+                    _browse_ma_jr_dir = self.auto_commcell.get_job_results_dir(browse_ma)
+                    db_path = VirtualServerConstants.get_live_browse_db_path(_browse_ma_jr_dir)
+                    db_name = VirtualServerUtils.find_live_browse_db_file(self.ma_machine, db_path)
+                    current_extent_count = self.get_extent_count(db_path, db_name)
+
+                    if current_extent_count > pre_extent_count:
+                        self.log.info("Extent should have reduced but increased will wait  for 3 error ")
+                        error_count = error_count + 1
+                        if error_count > 4:
+                            raise Exception("pruning is not happening , please check logs")
+
+                    pre_extent_count = current_extent_count
+                    self.log.info("Waiting for 2 mins for next check")
+                    time.sleep(120)
+                    wait_time = wait_time + 120
+
+                time.sleep(200)
+
+            self.log.info("performing Post un-mount validation")
+            # disk Un-mount validation
+            self.log.info("Calculating the disk-count of the MA after restore")
+            disk_count_after_restore = self.ma_machine.get_disk_count()
+            self.log.info("Performing Live Browse Un-mount Validation")
+            if (int(disk_count_before_restore)) >= (int(disk_count_after_restore)):
+                self.log.info("Disk Unmounted Successfully")
+            else:
+                self.log.info(
+                    "Failed to unmount disk, Number of Disk before restore:%s and Number of disk after restore:%s" % (
+                        disk_count_before_restore, disk_count_after_restore))
+                raise Exception("Failed to Un-mount Disk")
+
+            # Path CleanUp Validation
+            live_browse_mount_path = VirtualServerConstants.get_live_browse_mount_path(
+                                                                                        _browse_ma_jr_dir,
+                                                                                        self.hvobj.VMs[_vm].GUID)
+            files_in_path = self.ma_machine.get_files_in_path(live_browse_mount_path)
+            if files_in_path:
+                self.log.info("Not files are cleaned after Live browse, please check the folder %s"
+                                                                                        % live_browse_mount_path)
+                raise Exception("Staging Path CleanUp Failed")
+            else:
+                self.log.info("Staging Path %s was cleaned successfully" % live_browse_mount_path)
+
+        except Exception as err:
+            self.log.exception("Failed in performing Block Level Validation")
+            raise err
+
+    def fs_testdata_validation(self, dest_client, dest_location):
+        """
+        Does Validation of Backed up and data restored from file level
+
+        Args:
+                dest_client     (obj)   -   Machine class object of Destination client
+
+                dest_location   (str)   - destination location of file level restore job
+
+
+        Exception
+                if folder comparison fails
+
+
+        """
+        try:
+            # check with someone for the below
+            temp_hash = dest_client._get_folder_hash(self.testdata_path)
+            source_hash = set()
+
+            for val in temp_hash:
+                source_hash.add((val[0].split("TestData\\")[1], val[1]))
+
+            destination_hash = dest_client._get_folder_hash(dest_location)
+
+            _diff_file_list = source_hash - destination_hash
+
+            if _diff_file_list:
+                self.log.info("checksum mismatched for files  %s" %
+                              _diff_file_list)
+                raise Exception("Folder Comparison Failed for Source:%s and destination %s" % (
+                    self.testdata_path, dest_location))
+
+        except Exception as err:
+            self.log.exception("Exception in FSTestdataValidation")
+            raise err
+
+    def disk_restore(self, disk_restore_options):
+        """
+
+        perform Disk restore for specific subclinet
+
+        Args:
+                disk_restore_options  (obj)  - represent options that need to be set
+                                                    while performing disk  restore
+
+        Exception:
+                        if job fails
+                        if validation fails
+
+        """
+        try:
+            for _vm in self.vm_list:
+
+                self.disk_restore_dest = os.path.join(
+                    disk_restore_options.restore_path, self.backup_folder_name, _vm)
+
+                # """
+                disk_restore_job = self.subclient.disk_restore(
+                        _vm, disk_restore_options.destination_client,
+                        self.disk_restore_dest, disk_restore_options.unconditional_overwrite,
+                        disk_restore_options.copy_precedence)
+
+                if not disk_restore_job.wait_for_completion():
+                    raise Exception(
+                        "Failed to run disk  level restore  job with error: " +
+                        str(disk_restore_job.delay_reason)
+                    )
+
+
+                self.log.info("Disk restore job completed successfully with job id {0}".format(disk_restore_job.job_id))
+
+                # """
+
+                if self.hvobj.VMs[_vm].GuestOS == "Windows":
+                    self.disk_validation(
+                        self.hvobj.VMs[_vm], disk_restore_options._destination_pseudo_client, self.disk_restore_dest)
+
+        except Exception as err:
+            self.log.exception("Exception occurred please check logs")
+            raise Exception("Disk Restore Job failed, please check agent logs {0}".format(err))
+
+    def disk_validation(self, vm_obj, destination_client_name, disk_restore_destination):
+        """
+        Performs Disk Validation by mounting the restored disk on the Host
+
+        Args:
+
+        _vm                     (str)   - object of VMHelper class
+
+        destination_client_name    (str)   - Pseudo  client name of the destination client
+
+        disk_restore_destination    (str)   - restore path of all the disk
+
+        Exception:
+                        if job fails
+                        if validation fails
+
+        """
+        try:
+
+            self.log.info("Performed Restore in client %s" %
+                          destination_client_name)
+            dest_client_hypervisor = self.auto_vsainstance._create_hypervisor_object(
+                destination_client_name)
+
+            _list_of_disks = dest_client_hypervisor.get_disk_in_the_path(disk_restore_destination)
+
+            _vm_disk_list = vm_obj.disk_list
+            if not _vm_disk_list:
+                self.log.info(
+                    "Cannot validate the Disk as we cannot find the disk attached to the VM")
+                return False
+
+            if not ((_list_of_disks is None) or (_list_of_disks == [])):
+                _final_mount_disk_list = []
+                for each_disk in _vm_disk_list:
+                    each_disk_name = os.path.basename(each_disk).split(".")[0]
+                    for disk_path in _list_of_disks:
+                        if each_disk_name in disk_path:
+                            _final_mount_disk_list.append(disk_path)
+
+            else:
+                self.log.info(
+                    "the Disk cannot be validated as we cannot find disk with Hypervisor extension,\
+                                                                could be converted disk")
+                return False
+
+            if not _final_mount_disk_list:
+                _final_mount_disk_list = _list_of_disks
+
+            for _file in _final_mount_disk_list:
+                self.log.info("Validation Started For Disk :[%s]" % _file)
+                _drive_letter = dest_client_hypervisor.mount_disk(vm_obj, _file)
+                if _drive_letter != -1:
+                    for each_drive in _drive_letter:
+                        dest_folder_path = VirtualServerConstants.get_folder_to_be_compared(
+                            self.backup_folder_name, each_drive)
+                        self.log.info("Folder comparison started...")
+                        time.sleep(5)
+                        self.fs_testdata_validation(
+                            vm_obj.host_machine, dest_folder_path)
+                else:
+                    self.log.error("ERROR - Error mounting VMDK " + _file)
+                    raise Exception("Exception at Mounting Disk ")
+
+                dest_client_hypervisor.un_mount_disk(vm_obj, _file)
+
+        except Exception as err:
+            self.log.exception("Exception occurred please check logs")
+            dest_client_hypervisor.un_mount_disk(vm_obj.vm_name, _file)
+            raise err
+
+    def virtual_machine_restore(self, vm_restore_options):
+        """
+        perform Full VM restore for specific subclient
+
+        Args:
+                vm_restore_options  -options that need to be set while performing vm  restore
+
+        Exception:
+                        if job fails
+                        if validation fails
+
+        """
+        try:
+
+            # """
+            if vm_restore_options.in_place_overwrite:
+                vm_restore_job = self.subclient.full_vm_restore_in_place(
+                    overwrite=vm_restore_options.unconditional_overwrite,
+                    power_on=vm_restore_options.power_on_after_restore,
+                    copy_precedence=vm_restore_options.copy_precedence,
+                    add_to_failover=vm_restore_options.register_with_failover)
+
+            else:
+                if self.backup_folder_name:
+                    vm_restore_dest = os.path.join(vm_restore_options.destination_path,
+                                                   self.backup_folder_name)
+                else:
+                    vm_restore_dest = vm_restore_options.destination_path
+                vm_restore_options.destination_path = vm_restore_dest
+                vm_restore_job = self.subclient.full_vm_restore_out_of_place(
+                    vm_restore_options._dest_client_name,
+                    destination_path=vm_restore_options.destination_path,
+                    overwrite=vm_restore_options.unconditional_overwrite,
+                    power_on=vm_restore_options.power_on_after_restore,
+                    copy_precedence=vm_restore_options.copy_precedence,
+                    add_to_failover=vm_restore_options.register_with_failover,
+                    restore_option=vm_restore_options.advanced_restore_options)
+
+            if not vm_restore_job.wait_for_completion():
+                raise Exception(
+                    "Failed to run VM  restore  job with error: " +
+                    str(vm_restore_job.delay_reason)
+                )
+
+            # """
+
+            for vm in self.vm_list:
+                if vm_restore_options.in_place_overwrite:
+                    restore_vm_name = vm
+                else:
+                    restore_vm_name = "Delete" + vm
+                if vm_restore_options.restore_backup_job is not None:
+                    self.vm_restore_validation(vm, restore_vm_name, vm_restore_options, 'Basic')
+                else:
+                    self.vm_restore_validation(vm, restore_vm_name, vm_restore_options)
+
+        except Exception as err:
+            self.log.error("Exception while submitting Restore job:" + str(err))
+            raise err
+
+    def vm_restore_validation(self, vm, restore_vm, vm_restore_options, prop='Advanced'):
+        """
+        Param:
+             vm:                     -  Source Vm name
+             restore_vm:             -  Restored VM Name
+             vm_restore_options      -  options of VM restore options class
+             prop                    -  only validate basic or advanced properties
+        Exception:
+            if validation fails
+
+        """
+        try:
+            self.hvobj.VMs[vm].update_vm_info('All')
+            if vm_restore_options.in_place_overwrite:
+                self.log.info("it is Inplace restore")
+                source_obj = self.__deepcopy__((self.hvobj.VMs[vm]))
+            else:
+                source_obj = self.hvobj.VMs[vm]
+
+            vm_restore_options.dest_client_hypervisor.VMs = restore_vm
+            vm_restore_options.dest_client_hypervisor.VMs[restore_vm].update_vm_info('All')
+            restore_obj = vm_restore_options.dest_client_hypervisor.VMs[restore_vm]
+            on_premise = VirtualServerConstants.on_premise_hypervisor(
+                                        vm_restore_options.dest_client_hypervisor.instance_type)
+
+            if vm_restore_options.in_place_overwrite and on_premise:
+                if not restore_obj.GUID == source_obj.GUID:
+                    raise Exception("The GUID id of the in place restored VM does not match the source VM")
+            if not restore_obj.NoofCPU == source_obj.NoofCPU:
+                raise Exception("The CPU count does not match for the source and restored VM")
+            if not restore_obj.Diskcount == source_obj.Diskcount:
+                raise Exception("The disk count does not match for the source and restored VM")
+
+            if prop == 'Basic':
+                if re.match(VirtualServerConstants.Ip_regex, "%s" % restore_obj.IP):
+                    raise Exception("The IP address of the restored VM is not of the proper format"
+                                    ". Boot validation failed.")
+            else:
+                if ((not (re.match(VirtualServerConstants.Ip_regex, "%s" % restore_obj.IP))) and (
+                                                                         not (restore_obj.IP is None))):
+                    for each_drive in source_obj.drive_list:
+                        dest_location = each_drive + "\\TestData"
+                        self.fs_testdata_validation(vm_restore_options.dest_machine, dest_location)
+
+                elif ((self.hvobj.VMs[vm].GuestOS == "Windows") and (
+                        not vm_restore_options.in_place_overwrite) and (on_premise)):
+                    self.disk_validation(restore_obj, vm_restore_options._destination_pseudo_client,
+                                         vm_restore_options.destination_path)
+                else:
+                    self.log.info(
+                    "This is Linux VM and the destination Ip is not proper ,"
+                                        "so no Data Validation cannot be performed")
+
+        except Exception as err:
+            self.log.exception("Exception occurred in VM restore validation " + str(err))
+            raise Exception("Exception in VM restore validation")
+
+    def _get_all_backup_jobs(self):
+        """
+        Get all the backup jobs for the subclient
+        :return:
+            job_history     (dict)  -   all the unaged jobs for that subclient
+                Ex:
+                    {'job_cycle_1': {'bkp_level_full':  {'job_id':['aux_copy_jobid_1','aux_2']},
+                                     'bkp_level_incr': {'job_id1':['aux1','aux2'],
+                                                        'job_id2':['aux1','aux2']}
+                                    },
+                     'job_cycle_2': {'bkp_level_synth': {'job_id':['aux1','aux2']}
+                                    }
+                    }
+        """
+        job_history ={}
+
+        _query = "select distinct BS.jobID, BS.bkpLevel, BS.fullCycleNum, DS.auxCopyJobId " \
+                 "from JMBkpStats as BS join JMJobDataStats as DS ON BS.jobId = DS.jobId " \
+                 "where BS.agedTime = 0 and BS.appId={0}".format(self.subclient_id)
+        self.csdb.execute(_query)
+
+        _results = self.csdb.fetch_all_rows()
+
+        for result in _results:
+            cycle_num = result[2].strip()
+            job_id = result[0].strip()
+            level = result[1].strip()
+            aux_copy = result[3].strip()
+            if cycle_num in job_history.keys():
+                if level in job_history[cycle_num].keys():
+                    if job_id in job_history[cycle_num][level].keys():
+                        aux_jobs = job_history[cycle_num][level][job_id]
+                        aux_jobs.append(aux_copy)
+                        aux_jobs = list(set(aux_jobs))
+                        try:
+                            aux_jobs.remove('0')
+                        except ValueError:
+                            pass
+                        job_history[cycle_num][level][job_id] = aux_jobs
+                    else:
+                        job_history[cycle_num][level][job_id] = [aux_copy]
+                else:
+                    job_history[cycle_num][level] = {job_id: [aux_copy]}
+            else:
+                job_history[cycle_num] = {level: {}}
+                job_history[cycle_num][level] = {job_id: [aux_copy]}
+
+        return job_history

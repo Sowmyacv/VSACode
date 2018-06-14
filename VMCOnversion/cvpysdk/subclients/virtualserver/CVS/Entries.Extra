@@ -1,0 +1,6 @@
+/__init__.py////
+/azureRMsubclient.py////
+/azuresubclient.py////
+/fusioncomputesubclient.py////
+/hypervsubclient.py////
+/vmwaresubclient.py////
