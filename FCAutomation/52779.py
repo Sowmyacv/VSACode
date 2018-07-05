@@ -30,7 +30,7 @@ class TestCase(CVTestCase):
     def __init__(self):
         """Initializes test case class object"""
         super(TestCase, self).__init__()
-        self.name = "VSA Fusion Compute Full Backup and Restore Cases"
+        self.name = "VSA Fusion Compute incremental Backup and Restore Cases"
         self.id = os.path.basename(__file__).split(".py")[0]
         self.product = self.products_list.VIRTUALIZATIONFUSIONCOMPUTE
         self.feature = self.features_list.DATAPROTECTION
@@ -60,10 +60,11 @@ class TestCase(CVTestCase):
                 "----------------------------------------Backup-----------------------------------"
                 )
             backup_options = OptionsHelper.BackupOptions(auto_subclient)
+            backup_options.backup_type = "INCREMENTAL"
             auto_subclient.backup(backup_options)
 
             # """
-            """
+            #"""
 
             log.info(
                 "----------------------------------------File Level restores---------------------")
@@ -73,7 +74,7 @@ class TestCase(CVTestCase):
             auto_subclient.guest_file_restore(fs_restore_options)
 
             # """
-            """
+            #"""
 
             log.info(
                 "----------------------------------------FULL VM out of Place restores------------"

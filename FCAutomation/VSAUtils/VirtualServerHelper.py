@@ -1124,8 +1124,8 @@ class AutoVSASubclient(object):
         """
         :return: current running process id
         """
-        return str(os.getpid())
-        #return "1728"
+        #return str(os.getpid())
+        return "2200"
 
     @property
     def controller_machine(self):
@@ -1979,7 +1979,7 @@ class AutoVSASubclient(object):
             self.log.info("creating test data directory %s" % self.testdata_path)
             self.log.info("Generating Test data folders")
 
-            #"""
+            """
             generate = self.controller_machine.generate_test_data(self.testdata_path)
             if not generate:
                 raise Exception(generate)
@@ -1988,8 +1988,8 @@ class AutoVSASubclient(object):
                 self.hvobj.VMs[_vm].update_vm_info('All', True)
                 for _label, _drive in self.hvobj.VMs[_vm].drive_list.items():
                     self.log.info("Copying Testdata to Drive %s" % _drive)
-                    self.hvobj.copy_test_data_to_each_volume(
-                        _vm, _drive, self.backup_folder_name, self.testdata_path)
+                    #self.hvobj.copy_test_data_to_each_volume(
+                        #_vm, _drive, self.backup_folder_name, self.testdata_path)
 
         except Exception as err:
             self.log.exception(
@@ -2045,7 +2045,7 @@ class AutoVSASubclient(object):
 
             self.vsa_discovery()
 
-            #"""
+            """
 
             self.log.info("Starting Backup Job")
 
@@ -2515,6 +2515,7 @@ class AutoVSASubclient(object):
                     vm_restore_job = self.subclient.full_vm_restore_in_place(
                         overwrite=vm_restore_options.unconditional_overwrite,
                         power_on=vm_restore_options.power_on_after_restore,
+                        proxy_client=vm_restore_options.proxy_client,
                         copy_precedence=vm_restore_options.copy_precedence)
                     return vm_restore_job
 

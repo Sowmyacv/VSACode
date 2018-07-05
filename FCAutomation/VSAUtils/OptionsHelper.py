@@ -957,6 +957,7 @@ class FullVMRestoreOptions(object):
         self.dest_client_hypervisor = None
         self._browse_ma_client_name, self._browse_ma_id = self.auto_subclient.browse_ma
         self.in_place = False
+        self._proxy_client = None
         self.add_to_failover = False
         self._destination_client = None
         self.destination_path = ""
@@ -1228,6 +1229,28 @@ class FullVMRestoreOptions(object):
 
         """
         self.add_to_failover = value
+
+    @property
+    def proxy_client(self):
+        """
+        Returns value of Overwrite set in Full VM restore
+        it is read only attribute
+        """
+        return self._proxy_client
+
+    @proxy_client.setter
+    def proxy_client(self, value):
+        """
+        This registers VM with Failover cluster
+
+        Args:
+
+        Value    (bool)     - True -  Register with Failover
+            default:False
+
+        """
+        _proxy = self.auto_subclient.auto_commcell.commcell.clients.get(value)
+        self._proxy_client = _proxy.client_name
 
     def _process_inputs(self, attr_to_set, user_input):
         """
